@@ -1,0 +1,109 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <pthread.h>
+#include <unistd.h>
+
+#define BUFFER_SIZE 5
+#define NUM_ITEMS 10
+
+int buffer1[BUFFER_SIZE], buffer2[BUFFER_SIZE];
+int in1 = 0, out1 = 0, in2 = 0, out2 = 0;
+int count1 = 0, count2 = 0;
+
+pthread_mutex_t mutex1 = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t mutex2 = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t full1 = PTHREAD_COND_INITIALIZER;
+pthread_cond_t empty1 = PTHREAD_COND_INITIALIZER;
+pthread_cond_t full2 = PTHREAD_COND_INITIALIZER;
+pthread_cond_t empty2 = PTHREAD_COND_INITIALIZER;
+
+void *stage1(void *arg) {
+    for (int i = 1; i <= NUM_ITEMS; i++) {
+        pthread_mutex_lock(&mutex1);
+        while (count1 == BUFFER_SIZE)
+            pthread_cond_wait(&empty1, &mutex1);
+
+        buffer1[in1] = i;
+        printf("Stage 1: Produced %d\n", i);
+        in1 = (in1 + 1) % BUFFER_SIZE;
+        count1++;
+
+        pthread_cond_signal(&full1);
+        pthread_mutex_unlock(&mutex1);
+        sleep(1);
+    }
+    return NULL;
+}
+
+void *stage2(void *arg) {
+    for (int i = 1; i <= NUM_ITEMS; i++) {
+        pthread_mutex_lock(&mutex1);
+        while (count1 == 0)
+            pthread_cond_wait(&full1, &mutex1);
+
+        int val = buffer1[out1];
+        out1 = (out1 + 1) % BUFFER_SIZE;
+        count1--;
+
+        pthread_cond_signal(&empty1);
+        pthread_mutex_unlock(&mutex1);
+
+        int result = val * val;
+
+        pthread_mutex_lock(&mutex2);
+        while (count2 == BUFFER_SIZE)
+            pthread_cond_wait(&empty2, &mutex2);
+
+        buffer2[in2] = result;
+        printf("Stage 2: Squared %d → %d\n", val, result);
+        in2 = (in2 + 1) % BUFFER_SIZE;
+        count2++;
+
+        pthread_cond_signal(&full2);
+        pthread_mutex_unlock(&mutex2);
+        sleep(1);
+    }
+    return NULL;
+}
+
+void *stage3(void *arg) {
+    for (int i = 1; i <= NUM_ITEMS; i++) {
+        pthread_mutex_lock(&mutex2);
+        while (count2 == 0)
+            pthread_cond_wait(&full2, &mutex2);
+
+        int val = buffer2[out2];
+        out2 = (out2 + 1) % BUFFER_SIZE;
+        count2--;
+
+        pthread_cond_signal(&empty2);
+        pthread_mutex_unlock(&mutex2);
+
+        printf("Stage 3: Consumed %d\n", val);
+        sleep(1);
+    }
+    return NULL;
+}
+
+int main() {
+    pthread_t t1, t2, t3;
+
+    if (pthread_create(&t1, NULL, stage1, NULL) != 0) {
+        perror("Failed to create thread t1");
+        exit(EXIT_FAILURE);
+    }
+    if (pthread_create(&t2, NULL, stage2, NULL) != 0) {
+        perror("Failed to create thread t2");
+        exit(EXIT_FAILURE);
+    }
+    if (pthread_create(&t3, NULL, stage3, NULL) != 0) {
+        perror("Failed to create thread t3");
+        exit(EXIT_FAILURE);
+    }
+
+    pthread_join(t1, NULL);
+    pthread_join(t2, NULL);
+    pthread_join(t3, NULL);
+
+    return 0;
+}
